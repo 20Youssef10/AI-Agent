@@ -1,0 +1,40 @@
+{
+  "name": "ai-agent",
+  "version": "1.0.0",
+  "description": "A professional AI agent powered by Groq LLMs with file operations and task planning capabilities",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "ai-agent": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "agent": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "groq",
+    "llm",
+    "cli",
+    "automation",
+    "code",
+    "assistant"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "dotenv": "^17.2.4",
+    "fs-extra": "^11.3.3",
+    "groq-sdk": "^0.37.0",
+    "inquirer": "^13.2.2",
+    "ora": "^9.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
