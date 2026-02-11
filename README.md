@@ -278,3 +278,32 @@ If a model fails:
 ---
 
 **Happy Coding!** 🤖✨
+
+## 🆕 Advanced Productivity & Safety
+
+This release adds major workflow upgrades:
+
+- **Safe Mode** for destructive operations with confirmation prompts
+- **Preview + Diff** before writing AI generated changes
+- **Workspace Scoping** to prevent edits outside project root
+- **Undo/Redo** for file operations
+- **Project Prompt** support via `.ai-agent/prompt.md`
+- **Session Management** (`/session save|load|list|delete`)
+- **Search/Open Helpers** (`/search`, `/open`)
+- **Optional Shell Runner** (`/run`) with safety policy
+- **Streaming Toggle** (`/stream on|off`)
+- **Config Import/Export** (`/config import|export`)
+
+### New Commands
+
+- `/undo` / `/redo`
+- `/search <pattern>`
+- `/open <path>:<line>`
+- `/session save|load|list|delete <name>`
+- `/prompt show|edit <text>|reset`
+- `/stream on|off`
+- `/preview on|off`
+- `/config workspace <path>`
+- `/config safemode on|off`
+- `/config showdiff on|off`
+- `/config export <path>` / `/config import <path>`

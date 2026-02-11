@@ -96,7 +96,7 @@ CONSIDERATIONS:
   /**
    * Execute a plan step by step
    */
-  async executePlan(planId, fileManager, executor) {
+  async executePlan(planId, fileManager, executor, options = {}) {
     const plan = this.plans.find(p => p.id === planId);
     if (!plan) {
       throw new Error(`Plan not found: ${planId}`);
@@ -106,7 +106,9 @@ CONSIDERATIONS:
     
     const results = [];
     
-    for (let i = 0; i < plan.steps.length; i++) {
+    const startIndex = Number.isInteger(options.startFrom) ? options.startFrom : 0;
+
+    for (let i = startIndex; i < plan.steps.length; i++) {
       const step = plan.steps[i];
       console.log(chalk.yellow(`\n[Step ${i + 1}/${plan.steps.length}] ${step}`));
       
@@ -116,11 +118,11 @@ CONSIDERATIONS:
         context: plan.context
       });
       
-      results.push(result);
+      results.push({ ...result, status: result.success ? 'success' : 'failed', stepIndex: i });
       
       if (!result.success) {
         console.log(chalk.red(`\n❌ Step ${i + 1} failed: ${result.error}`));
-        return { success: false, completedSteps: i, results };
+        return { success: false, completedSteps: i, failedStep: i + 1, results };
       }
     }
     
