@@ -1,12 +1,16 @@
 /**
- * GroqClient - Manages Groq API interactions and model selection
+ * GroqClient - Handles communication with Groq LLM API
  */
 
 import Groq from 'groq-sdk';
 import chalk from 'chalk';
 import ora from 'ora';
+import fs from 'fs-extra';
+import path from 'path';
+import os from 'os';
 
-// Available Groq models
+const SESSIONS_DIR = path.join(os.homedir(), '.ai-agent', 'sessions');
+
 export const AVAILABLE_MODELS = {
   'llama-3.3-70b-versatile': {
     name: 'Llama 3.3 70B',
@@ -52,31 +56,22 @@ export const AVAILABLE_MODELS = {
   }
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export class GroqClient {
   constructor(apiKey, model = 'llama-3.3-70b-versatile') {
-    if (!apiKey) {
-      throw new Error('Groq API key is required');
-    }
-    
+    if (!apiKey) throw new Error('Groq API key is required');
     this.client = new Groq({ apiKey });
     this.model = model;
     this.messageHistory = [];
   }
 
-  /**
-   * Set the current model
-   */
   setModel(modelId) {
-    if (!AVAILABLE_MODELS[modelId]) {
-      throw new Error(`Unknown model: ${modelId}`);
-    }
+    if (!AVAILABLE_MODELS[modelId]) throw new Error(`Unknown model: ${modelId}`);
     this.model = modelId;
     console.log(chalk.cyan(`Model switched to: ${AVAILABLE_MODELS[modelId].name}`));
   }
 
-  /**
-   * Get current model info
-   */
   getCurrentModel() {
     return {
       id: this.model,
@@ -84,80 +79,64 @@ export class GroqClient {
     };
   }
 
-  /**
-   * Send a message to the model
-   */
+  async createCompletionWithRetry(payload, options = {}) {
+    const maxRetries = options.maxRetries ?? 2;
+    const baseDelayMs = options.baseDelayMs ?? 500;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        return await this.client.chat.completions.create(payload);
+      } catch (error) {
+        const status = error?.status || error?.response?.status;
+        const transient = status === 429 || (status >= 500 && status < 600);
+        if (!transient || attempt === maxRetries) throw error;
+        const delay = baseDelayMs * (2 ** attempt);
+        console.log(chalk.yellow(`Retrying request (${attempt + 1}/${maxRetries}) in ${delay}ms...`));
+        await sleep(delay);
+      }
+    }
+  }
+
   async sendMessage(content, options = {}) {
     const spinner = ora('Thinking...').start();
-    
+
     try {
       const messages = [
-        {
-          role: 'system',
-          content: options.systemPrompt || this.getDefaultSystemPrompt()
-        },
+        { role: 'system', content: options.systemPrompt || this.getDefaultSystemPrompt() },
         ...this.messageHistory,
-        {
-          role: 'user',
-          content: content
-        }
+        { role: 'user', content }
       ];
 
-      const response = await this.client.chat.completions.create({
+      const response = await this.createCompletionWithRetry({
         messages,
         model: this.model,
         temperature: options.temperature ?? 0.7,
         max_tokens: options.maxTokens ?? AVAILABLE_MODELS[this.model]?.maxTokens ?? 4096,
         top_p: options.topP ?? 1,
         stream: false
-      });
+      }, options);
 
       const assistantMessage = response.choices[0]?.message?.content;
-      
       if (assistantMessage) {
-        // Update message history
-        this.messageHistory.push(
-          { role: 'user', content: content },
-          { role: 'assistant', content: assistantMessage }
-        );
-        
-        // Keep history manageable (last 20 messages)
-        if (this.messageHistory.length > 20) {
-          this.messageHistory = this.messageHistory.slice(-20);
-        }
+        this.messageHistory.push({ role: 'user', content }, { role: 'assistant', content: assistantMessage });
+        if (this.messageHistory.length > 20) this.messageHistory = this.messageHistory.slice(-20);
       }
 
       spinner.stop();
-      return {
-        success: true,
-        content: assistantMessage,
-        usage: response.usage
-      };
+      return { success: true, content: assistantMessage, usage: response.usage };
     } catch (error) {
       spinner.stop();
       console.error(chalk.red(`API Error: ${error.message}`));
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
-  /**
-   * Send a message with streaming response
-   */
   async sendMessageStream(content, options = {}, onChunk) {
     try {
       const messages = [
-        {
-          role: 'system',
-          content: options.systemPrompt || this.getDefaultSystemPrompt()
-        },
+        { role: 'system', content: options.systemPrompt || this.getDefaultSystemPrompt() },
         ...this.messageHistory,
-        {
-          role: 'user',
-          content: content
-        }
+        { role: 'user', content }
       ];
 
       const stream = await this.client.chat.completions.create({
@@ -170,45 +149,59 @@ export class GroqClient {
       });
 
       let fullContent = '';
-      
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
-        fullContent += content;
-        if (onChunk) {
-          onChunk(content);
-        }
+        const chunkContent = chunk.choices[0]?.delta?.content || '';
+        fullContent += chunkContent;
+        if (onChunk) onChunk(chunkContent);
       }
 
-      // Update history
-      this.messageHistory.push(
-        { role: 'user', content: content },
-        { role: 'assistant', content: fullContent }
-      );
+      this.messageHistory.push({ role: 'user', content }, { role: 'assistant', content: fullContent });
+      if (this.messageHistory.length > 20) this.messageHistory = this.messageHistory.slice(-20);
 
-      return {
-        success: true,
-        content: fullContent
-      };
+      return { success: true, content: fullContent };
     } catch (error) {
       console.error(chalk.red(`Streaming Error: ${error.message}`));
-      return {
-        success: false,
-        error: error.message
-      };
+      return { success: false, error: error.message };
     }
   }
 
-  /**
-   * Clear conversation history
-   */
+  async saveHistory(name, metadata = {}) {
+    await fs.ensureDir(SESSIONS_DIR);
+    const filePath = path.join(SESSIONS_DIR, `${name}.json`);
+    await fs.writeJson(filePath, {
+      name,
+      savedAt: new Date().toISOString(),
+      model: this.model,
+      metadata,
+      history: this.messageHistory
+    }, { spaces: 2 });
+    return filePath;
+  }
+
+  async loadHistory(name) {
+    const filePath = path.join(SESSIONS_DIR, `${name}.json`);
+    const session = await fs.readJson(filePath);
+    this.model = session.model || this.model;
+    this.messageHistory = session.history || [];
+    return session;
+  }
+
+  async listSessions() {
+    await fs.ensureDir(SESSIONS_DIR);
+    const files = await fs.readdir(SESSIONS_DIR);
+    return files.filter((file) => file.endsWith('.json')).map((file) => file.replace('.json', ''));
+  }
+
+  async deleteSession(name) {
+    const filePath = path.join(SESSIONS_DIR, `${name}.json`);
+    await fs.remove(filePath);
+  }
+
   clearHistory() {
     this.messageHistory = [];
     console.log(chalk.gray('Conversation history cleared'));
   }
 
-  /**
-   * Get default system prompt
-   */
   getDefaultSystemPrompt() {
     return `You are a professional AI coding assistant with expertise in software engineering, architecture, and best practices.
 
@@ -229,14 +222,8 @@ When responding:
 You can help with any programming language and framework.`;
   }
 
-  /**
-   * List all available models
-   */
   static listModels() {
-    return Object.entries(AVAILABLE_MODELS).map(([id, info]) => ({
-      id,
-      ...info
-    }));
+    return Object.entries(AVAILABLE_MODELS).map(([id, info]) => ({ id, ...info }));
   }
 }
 
